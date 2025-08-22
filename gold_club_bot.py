@@ -1,9 +1,9 @@
-# gold_club_bot.py (Browserless.io Entegrasyonunun Son ve Doğru Hali)
+# gold_club_bot.py (Nihai Sürüm - Browserless.io Entegrasyonu Tamamlandı)
 import time
 import traceback
 import re
 import requests
-import os
+import os  # Ortam değişkenlerini okumak için gerekli
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -22,13 +22,19 @@ class GoldClubBot:
         self.base_url = "https://goldclubhosting.xyz/"
 
     def _report_status(self, message):
+        # Bu fonksiyon loglamayı yapar, Vercel loglarında bu mesajları göreceğiz.
         print(f"SID {self.sid}: {message}")
         if self.socketio and self.sid:
             self.socketio.emit('status_update', {'message': message}, to=self.sid)
 
     def _setup_driver(self):
+        """
+        Yerel WebDriver yerine uzaktaki Browserless.io tarayıcısına bağlanır.
+        Bu yöntem, Vercel'in "read-only file system" ve tarayıcı eksikliği kısıtlamalarını aşar.
+        """
         self._report_status("-> Uzak tarayıcıya (Browserless.io) bağlanılıyor...")
 
+        # Vercel ortam değişkenlerinden API anahtarını al
         api_key = os.environ.get('BROWSERLESS_API_KEY')
         if not api_key:
             error_message = "[KRİTİK HATA] BROWSERLESS_API_KEY ortam değişkeni bulunamadı!"
@@ -37,17 +43,18 @@ class GoldClubBot:
 
         try:
             options = webdriver.ChromeOptions()
+            # Sunucusuz ortamlar için gerekli olan standart argümanlar
             options.add_argument('--headless')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
 
-            # --- SON DÜZELTME: wss:// yerine tekrar https:// kullanıyoruz ---
-            # Selenium'un ilk bağlantı için standart bir HTTP endpoint'ine ihtiyacı vardır.
+            # --- NİHAİ DÜZELTME: Hata mesajında belirtilen YENİ HOST ADI ve DOĞRU PROTOKOL ---
             self.driver = webdriver.Remote(
-                command_executor=f"https://chrome.browserless.io/webdriver?token={api_key}",
+                command_executor=f"https://production-sfo.browserless.io/webdriver?token={api_key}",
                 options=options
             )
-            self.wait = WebDriverWait(self.driver, 25)
+            # Uzak bağlantılarda ağ gecikmesi olabileceğinden bekleme süresini 30 saniye yapmak iyi bir pratiktir
+            self.wait = WebDriverWait(self.driver, 30)
             self._report_status("-> Uzak tarayıcıya başarıyla bağlanıldı.")
 
         except WebDriverException as e:
@@ -57,7 +64,7 @@ class GoldClubBot:
             self._report_status(f"[BEKLENMEDİK HATA] WebDriver kurulumunda hata: {e}")
             raise
 
-    # --- DİĞER FONKSİYONLAR DEĞİŞMEDEN AYNI KALIYOR ---
+    # --- DİĞER TÜM BOT FONKSİYONLARI DEĞİŞMEDEN AYNI KALIYOR ---
 
     def _find_element_with_retry(self, by, value, retries=3, delay=5):
         for i in range(retries):
