@@ -12,6 +12,10 @@
   ],
   "routes": [
     {
+      "src": "/api/run_bot_task",
+      "dest": "run_bot_task.py"
+    },
+    {
       "src": "/(.*)",
       "dest": "app.py"
     }
