@@ -1,9 +1,9 @@
-# gold_club_bot.py (Nihai Sürüm - Browserless.io Entegrasyonu Tamamlandı)
+# gold_club_bot.py (Nihai Sürüm - LambdaTest Entegrasyonu)
 import time
 import traceback
 import re
 import requests
-import os  # Ortam değişkenlerini okumak için gerekli
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -22,40 +22,48 @@ class GoldClubBot:
         self.base_url = "https://goldclubhosting.xyz/"
 
     def _report_status(self, message):
-        # Bu fonksiyon loglamayı yapar, Vercel loglarında bu mesajları göreceğiz.
         print(f"SID {self.sid}: {message}")
         if self.socketio and self.sid:
             self.socketio.emit('status_update', {'message': message}, to=self.sid)
 
     def _setup_driver(self):
-        """
-        Yerel WebDriver yerine uzaktaki Browserless.io tarayıcısına bağlanır.
-        Bu yöntem, Vercel'in "read-only file system" ve tarayıcı eksikliği kısıtlamalarını aşar.
-        """
-        self._report_status("-> Uzak tarayıcıya (Browserless.io) bağlanılıyor...")
+        self._report_status("-> Uzak tarayıcıya (LambdaTest) bağlanılıyor...")
 
-        # Vercel ortam değişkenlerinden API anahtarını al
-        api_key = os.environ.get('BROWSERLESS_API_KEY')
-        if not api_key:
-            error_message = "[KRİTİK HATA] BROWSERLESS_API_KEY ortam değişkeni bulunamadı!"
+        # Vercel ortam değişkenlerinden LambdaTest kimlik bilgilerini al
+        lt_username = os.environ.get('LT_USERNAME')
+        lt_access_key = os.environ.get('LT_ACCESS_KEY')
+
+        if not lt_username or not lt_access_key:
+            error_message = "[KRİTİK HATA] LT_USERNAME veya LT_ACCESS_KEY ortam değişkenleri bulunamadı!"
             self._report_status(error_message)
             raise ValueError(error_message)
 
-        try:
-            options = webdriver.ChromeOptions()
-            # Sunucusuz ortamlar için gerekli olan standart argümanlar
-            options.add_argument('--headless')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
+        # LambdaTest'in ihtiyaç duyduğu tarayıcı ve platform ayarları
+        lt_options = {
+            "platformName": "Windows 10",
+            "browserName": "Chrome",
+            "browserVersion": "latest",
+            "build": "GoldClub Bot Run",
+            "name": f"Playlist Generation Task - {time.strftime('%Y-%m-%d %H:%M')}",
+            "visual": False,
+            "network": True,
+            "console": True,
+        }
 
-            # --- NİHAİ DÜZELTME: Hata mesajında belirtilen YENİ HOST ADI ve DOĞRU PROTOKOL ---
+        # Selenium 4 için options nesnesini ve LambdaTest ayarlarını birleştirme
+        options = webdriver.ChromeOptions()
+        options.set_capability('LT:Options', lt_options)
+
+        # LambdaTest bağlantı adresi
+        grid_url = f"https://{lt_username}:{lt_access_key}@hub.lambdatest.com/wd/hub"
+
+        try:
             self.driver = webdriver.Remote(
-                command_executor=f"https://production-sfo.browserless.io/webdriver?token={api_key}",
+                command_executor=grid_url,
                 options=options
             )
-            # Uzak bağlantılarda ağ gecikmesi olabileceğinden bekleme süresini 30 saniye yapmak iyi bir pratiktir
             self.wait = WebDriverWait(self.driver, 30)
-            self._report_status("-> Uzak tarayıcıya başarıyla bağlanıldı.")
+            self._report_status("-> Uzak tarayıcıya (LambdaTest) başarıyla bağlanıldı.")
 
         except WebDriverException as e:
             self._report_status(f"[HATA] Uzak tarayıcıya bağlanılamadı: {e.msg}")
@@ -64,7 +72,7 @@ class GoldClubBot:
             self._report_status(f"[BEKLENMEDİK HATA] WebDriver kurulumunda hata: {e}")
             raise
 
-    # --- DİĞER TÜM BOT FONKSİYONLARI DEĞİŞMEDEN AYNI KALIYOR ---
+    # --- DİĞER FONKSİYONLAR DEĞİŞMEDEN AYNI KALIYOR ---
 
     def _find_element_with_retry(self, by, value, retries=3, delay=5):
         for i in range(retries):
