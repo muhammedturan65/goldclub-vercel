@@ -1,7 +1,11 @@
-# requirements.txt
+# requirements.txt (Tam ve Doğru Hali)
+
+# Flask web sunucusu için
 Flask
-Flask-SocketIO
-eventlet
-requests
 gunicorn
-psycopg2-binary # Vercel Postgres için
+psycopg2-binary
+requests
+
+# Selenium botunun çalışması için GEREKLİ OLANLAR
+selenium
+webdriver-manager
