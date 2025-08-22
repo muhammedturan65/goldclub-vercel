@@ -1,0 +1,7 @@
+# requirements.txt
+Flask
+Flask-SocketIO
+eventlet
+requests
+gunicorn
+psycopg2-binary # Vercel Postgres için
