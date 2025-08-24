@@ -2,28 +2,22 @@
   "version": 2,
   "builds": [
     {
-      "src": "app.py",
-      "use": "@vercel/python"
+      "src": "/api/**/*.php",
+      "use": "@vercel/php"
     },
     {
-      "src": "run_bot_task.py",
+      "src": "/api/run_bot_task.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/api/run_bot_task",
-      "dest": "run_bot_task.py"
+      "dest": "/api/run_bot_task.py"
     },
     {
       "src": "/(.*)",
-      "dest": "app.py"
-    }
-  ],
-  "crons": [
-    {
-      "path": "/api/run_bot_task",
-      "schedule": "0 0 * * *"
+      "dest": "/api/$1.php"
     }
   ]
 }
