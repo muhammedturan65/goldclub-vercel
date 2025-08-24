@@ -1,10 +1,10 @@
-# run_bot_task.py ("Callback" Entegre Edilmiş Nihai Sürüm)
+# run_bot_task.py ("User-Agent" Eklenmiş Nihai Sürüm)
 import os
 import sys
 import requests
 from datetime import datetime
 from gold_club_bot import GoldClubBot
-from app import get_db_connection, send_email_notification # get_db_connection'ı sadece loglama için tutuyoruz
+from app import get_db_connection, send_email_notification
 import json
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -81,7 +81,6 @@ def run_bot(user_id=None, target_group="TURKISH", gist_id=None):
 
     if not result_data or not result_data.get('channels'):
         print("Bot işlemi başarısız oldu veya kanal bulunamadı.")
-        # Başarısızlığı logla (bu kısım Vercel Postgres'e loglar, ana MySQL'e değil)
         try:
             conn = get_db_connection()
             if conn and user_id:
@@ -107,7 +106,7 @@ def run_bot(user_id=None, target_group="TURKISH", gist_id=None):
     if new_gist_id and new_raw_url:
         print(f"-> Gist işlemi başarılı. ID: {new_gist_id}, URL: {new_raw_url}")
         
-        # --- YENİ BÖLÜM: Veritabanını güncellemek için PHP'ye haber ver ---
+        # --- GÜNCELLENMİŞ CALLBACK BÖLÜMÜ ---
         try:
             callback_url = os.environ['CALLBACK_URL']
             secret = os.environ['CALLBACK_SECRET']
@@ -119,8 +118,13 @@ def run_bot(user_id=None, target_group="TURKISH", gist_id=None):
                 'raw_url': new_raw_url
             }
             
+            # İsteği normal bir tarayıcı gibi göstermek için User-Agent başlığı ekliyoruz
+            callback_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
             print(f"--> Veritabanı güncellemesi için callback isteği gönderiliyor: {callback_url}")
-            callback_response = requests.get(callback_url, params=params, timeout=15)
+            callback_response = requests.get(callback_url, params=params, headers=callback_headers, timeout=15)
             callback_response.raise_for_status() # HTTP hatası varsa exception fırlat
             print(f"--> Callback isteği başarıyla gönderildi. Yanıt: {callback_response.text}")
 
@@ -142,7 +146,6 @@ def run_bot(user_id=None, target_group="TURKISH", gist_id=None):
 
     else:
         print(f"-> Gist yüklemesi/güncellemesi başarısız oldu: {error}")
-        # Başarısızlığı logla
         try:
             conn = get_db_connection()
             if conn and user_id:
