@@ -2,7 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "public/**/*.php",
+      "src": "public/index.php",
       "use": "vercel-php@0.6.0"
     },
     {
@@ -16,15 +16,7 @@
       "dest": "/api/run_bot_task.py"
     },
     {
-      "src": "/test-gold/(.*)",
-      "dest": "/public/$1.php"
-    },
-    {
-      "src": "/test-gold",
-      "dest": "/public/index.php"
-    },
-    {
-      "src": "/",
+      "src": "/(.*)",
       "dest": "/public/index.php"
     }
   ]
