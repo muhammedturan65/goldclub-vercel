@@ -1,13 +1,15 @@
 {
   "version": 2,
-  "functions": {
-    "api/**/*.php": {
-      "runtime": "vercel-php@0.6.0"
+  "builds": [
+    {
+      "src": "api/**/*.php",
+      "use": "vercel-php@0.6.0"
     },
-    "api/run_bot_task.py": {
-      "runtime": "@vercel/python"
+    {
+      "src": "api/run_bot_task.py",
+      "use": "@vercel/python"
     }
-  },
+  ],
   "routes": [
     {
       "src": "/api/run_bot_task",
@@ -16,6 +18,10 @@
     {
       "src": "/test-gold/(.*)",
       "dest": "/api/$1.php"
+    },
+    {
+      "src": "/test-gold",
+      "dest": "/api/index.php"
     },
     {
       "src": "/",
