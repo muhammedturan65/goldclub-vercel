@@ -1,88 +1,79 @@
-# run_bot_task.py (Otomatik Gist Silme Özellikli Nihai Sürüm)
+# run_bot_task.py (Dinamik Gist Güncelleme Sürümü)
 import os
 import sys
 import requests
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from gold_club_bot import GoldClubBot
-from app import get_db_connection, send_email_notification, upload_to_gist
+from app import get_db_connection, send_email_notification # upload_to_gist'i artık buradan almıyoruz
 import json
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-# --- YENİ FONKSİYON: Süresi Dolmuş Gist'leri Temizleme ---
-def cleanup_expired_gists():
+# --- GÜNCELLENMİŞ FONKSİYON: Gist OLUŞTURUR veya GÜNCELLER ---
+def upload_or_update_gist(filename, content, description, gist_id=None):
     """
-    GitHub'a bağlanır, kullanıcıya ait Gist'leri listeler ve oluşturulma tarihinin
-    üzerinden 48 saatten fazla geçmiş olanları siler.
+    Verilen içeriği GitHub Gist'e yükler veya günceller.
+    Eğer gist_id verilirse, o Gist'i günceller (PATCH).
+    Eğer gist_id verilmezse, yeni bir Gist oluşturur (POST).
     """
-    print("-> Süresi dolmuş Gist'ler için temizlik işlemi başlatılıyor...")
-    
     try:
-        # Gerekli bilgileri Vercel ortam değişkenlerinden al
-        username = os.environ['GITHUB_USERNAME']
         token = os.environ['GITHUB_TOKEN']
-        prefix = os.environ.get('GIST_DESCRIPTION_PREFIX', 'Filtrelenmiş Playlist') # Varsayılan değer ekledik
-    except KeyError as e:
-        print(f"[TEMİZLİK HATASI] Gerekli ortam değişkeni bulunamadı: {e}. Temizlik atlanıyor.")
-        return
+    except KeyError:
+        return None, None, "GitHub Token ortam değişkeni bulunamadı."
 
-    api_url = f"https://api.github.com/users/{username}/gists"
     headers = {
         'Authorization': f'Bearer {token}',
         'Accept': 'application/vnd.github.v3+json',
-        'X-GitHub-Api-Version': '2022-11-28' # API versiyonunu belirtmek iyi bir pratiktir
+        'X-GitHub-Api-Version': '2022-11-28'
+    }
+    
+    payload = {
+        'description': description,
+        'files': {
+            filename: {
+                'content': content
+            }
+        }
     }
 
     try:
-        response = requests.get(api_url, headers=headers, timeout=20)
-        response.raise_for_status()
-        gists = response.json()
-        
-        now_utc = datetime.now(timezone.utc)
-        deleted_count = 0
-
-        for gist in gists:
-            description = gist.get('description', '')
-            # Sadece bizim projemize ait Gist'leri kontrol et
-            if description and description.startswith(prefix):
-                created_at_str = gist['created_at']
-                # 'Z' harfini UTC timezone bilgisine çevirerek tarih nesnesi oluştur
-                created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-                
-                # Son kullanma tarihini hesapla (oluşturulma + 48 saat)
-                expires_at = created_at + timedelta(hours=48)
-                
-                if now_utc > expires_at:
-                    gist_id = gist['id']
-                    delete_url = f"https://api.github.com/gists/{gist_id}"
-                    
-                    print(f"--> Süresi dolan Gist bulundu (ID: {gist_id}). Siliniyor...")
-                    delete_response = requests.delete(delete_url, headers=headers, timeout=10)
-                    
-                    if delete_response.status_code == 204:
-                        print(f"--> Gist (ID: {gist_id}) başarıyla silindi.")
-                        deleted_count += 1
-                    else:
-                        print(f"[TEMİZLİK HATASI] Gist (ID: {gist_id}) silinemedi. Durum Kodu: {delete_response.status_code}, Yanıt: {delete_response.text}")
-        
-        if deleted_count > 0:
-            print(f"-> Temizlik tamamlandı. Toplam {deleted_count} adet süresi dolmuş Gist silindi.")
+        if gist_id:
+            # GÜNCELLEME MODU
+            print(f"--> Mevcut Gist (ID: {gist_id}) güncelleniyor...")
+            api_url = f"https://api.github.com/gists/{gist_id}"
+            response = requests.patch(api_url, headers=headers, json=payload, timeout=30)
         else:
-            print("-> Süresi dolmuş Gist bulunamadı. Temizlik tamamlandı.")
+            # OLUŞTURMA MODU
+            print("--> Yeni bir Gist oluşturuluyor...")
+            api_url = "https://api.github.com/gists"
+            payload['public'] = False # Yeni Gist'ler her zaman gizli olmalı
+            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+        
+        response.raise_for_status()
+        data = response.json()
+        
+        new_gist_id = data.get('id')
+        # Dosya adını dinamik olarak al, çünkü payload ile aynı olmayabilir
+        file_key = list(data.get('files', {}).keys())[0]
+        raw_url = data.get('files', {}).get(file_key, {}).get('raw_url')
 
-    except requests.RequestException as e:
-        print(f"[TEMİZLİK HATASI] GitHub API'sine bağlanılamadı: {e}")
-# -----------------------------------------------------------------
+        if not new_gist_id or not raw_url:
+            raise KeyError("API yanıtında 'id' veya 'raw_url' bulunamadı.")
 
-def run_bot(user_id=None, target_group="TURKISH"):
-    # --- ANA GÖREVE BAŞLAMADAN ÖNCE TEMİZLİĞİ ÇALIŞTIR ---
-    cleanup_expired_gists()
-    # ---------------------------------------------------
+        return new_gist_id, raw_url, None
 
+    except requests.exceptions.RequestException as e:
+        error_message = f"GitHub API'sine bağlanılamadı: {e}"
+        print(error_message)
+        return None, None, error_message
+    except (KeyError, IndexError) as e:
+        error_message = f"GitHub API'sinden beklenmedik yanıt: {response.text} (Hata: {e})"
+        print(error_message)
+        return None, None, error_message
+
+def run_bot(user_id=None, target_group="TURKISH", gist_id=None):
     if user_id:
-        print(f"İstek kullanıcı ID'si {user_id} için başlatıldı. Grup: {target_group}")
-    else:
-        print(f"Genel istek başlatıldı (kullanıcı belirtilmedi). Grup: {target_group}")
+        print(f"İstek kullanıcı ID'si {user_id} için başlatıldı. Gist ID: {gist_id or 'Yeni Oluşturulacak'}")
     
     try:
         email = os.environ['APP_EMAIL']
@@ -94,66 +85,74 @@ def run_bot(user_id=None, target_group="TURKISH"):
     bot = GoldClubBot(email=email, password=password, target_group=target_group)
     result_data = bot.run_full_process()
 
-    if not result_data or "url" not in result_data or not result_data.get('channels'):
-        print("Bot işlemi başarısız oldu veya uygun kanal bulunamadı. Veritabanına kayıt yapılmayacak.")
+    if not result_data or not result_data.get('channels'):
+        print("Bot işlemi başarısız oldu veya kanal bulunamadı.")
+        try:
+            conn = get_db_connection()
+            if conn and user_id:
+                stmt_log = conn.cursor()
+                stmt_log.execute("INSERT INTO activity_logs (user_id, username, action, status, details) VALUES (%s, %s, %s, %s, %s)",
+                                 (user_id, f"User {user_id}", 'Playlist Üretimi', 'Başarısız', 'Bot işlemi kanal bulamadı veya hata verdi.'))
+                conn.commit()
+                conn.close()
+        except Exception as log_e:
+            print(f"Loglama hatası: {log_e}")
         return
 
-    print(f"Bot işlemi başarılı. {len(result_data['channels'])} kanal bulundu. Veritabanına kaydediliyor...")
-
-    conn = get_db_connection()
-    if not conn:
-        print("Veritabanı bağlantısı kurulamadı. İşlem sonlandırılıyor.")
-        return
-
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO generated_links (m3u_url, expiry_date, channel_count, playlist_data)
-            VALUES (%s, %s, %s, %s) RETURNING id;
-            """,
-            (
-                result_data['url'],
-                result_data['expiry'],
-                len(result_data['channels']),
-                json.dumps(result_data['channels'])
-            )
-        )
-        new_id = cur.fetchone()[0]
-        conn.commit()
-    conn.close()
-    print(f"Yeni kayıt ID {new_id} ile veritabanına eklendi.")
-    
     m3u_content = "#EXTM3U\n"
     for ch in result_data['channels']:
         m3u_content += f'#EXTINF:-1 group-title="{ch["group"]}",{ch["name"]}\n{ch["url"]}\n'
-
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    gist_filename = f"playlist_{target_group}_{timestamp}.m3u"
     
+    gist_filename = f"playlist_{user_id or 'shared'}.m3u"
     user_tag = f"(User: {user_id})" if user_id else ""
-    gist_description = f"Filtrelenmiş Playlist ({target_group}) - {timestamp} {user_tag}"
-    
-    print(f"-> Playlist GitHub Gist'e yükleniyor... Açıklama: '{gist_description}'")
-    public_url, error = upload_to_gist(gist_filename, m3u_content, gist_description)
-    
-    if public_url:
-        print(f"-> Gist başarıyla yüklendi: {public_url}")
+    gist_description = f"Filtrelenmiş Playlist ({target_group}) {user_tag}"
+
+    new_gist_id, new_raw_url, error = upload_or_update_gist(gist_filename, m3u_content, gist_description, gist_id)
+
+    if new_gist_id and new_raw_url:
+        print(f"-> Gist işlemi başarılı. ID: {new_gist_id}, URL: {new_raw_url}")
+        
+        if not gist_id: # Sadece ilk Gist oluşturulduğunda çalışır
+            print(f"--> Bu yeni bir Gist. Kullanıcı {user_id} için veritabanı güncelleniyor...")
+            try:
+                conn = get_db_connection()
+                if conn and user_id:
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE users SET gist_id = %s, gist_raw_url = %s WHERE id = %s", (new_gist_id, new_raw_url, user_id))
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    print("--> Veritabanı başarıyla güncellendi.")
+                else:
+                     print("[HATA] Veritabanı güncellenemedi, bağlantı sorunu veya user_id eksik.")
+            except Exception as e:
+                print(f"[VERİTABANI HATASI] Gist bilgileri kaydedilemedi: {e}")
+        
+        # E-posta gönderme mantığı
         email_subject = f"Yeni Playlist Oluşturuldu ({target_group})"
-        email_body = (f"Yeni bir M3U playlist'i başarıyla oluşturuldu ve Gist'e yüklendi.\n\n"
+        email_body = (f"Yeni bir M3U playlist'i başarıyla oluşturuldu/güncellendi.\n\n"
                       f"Kullanıcı ID: {user_id or 'Belirtilmedi'}\n"
-                      f"Link: {public_url}\n"
+                      f"Kalıcı Link: {new_raw_url}\n"
                       f"Kanal Sayısı: {len(result_data['channels'])}\n"
                       f"Son Kullanma Tarihi: {result_data['expiry']}")
+        send_email_notification(email_subject, email_body)
+        print("-> E-posta bildirimi gönderildi.")
 
-        print("-> E-posta bildirimi gönderiliyor...")
-        if send_email_notification(email_subject, email_body):
-            print("-> E-posta bildirimi başarıyla gönderildi.")
-        else:
-            print("-> E-posta bildirimi gönderilemedi.")
     else:
-        print(f"-> Gist yüklemesi başarısız oldu: {error}")
+        print(f"-> Gist yüklemesi/güncellemesi başarısız oldu: {error}")
+        # Başarısızlığı logla
+        try:
+            conn = get_db_connection()
+            if conn and user_id:
+                stmt_log = conn.cursor()
+                stmt_log.execute("INSERT INTO activity_logs (user_id, username, action, status, details) VALUES (%s, %s, %s, %s, %s)",
+                                 (user_id, f"User {user_id}", 'Playlist Üretimi', 'Başarısız', f'Gist hatası: {error}'))
+                conn.commit()
+                conn.close()
+        except Exception as log_e:
+            print(f"Loglama hatası: {log_e}")
 
-# --- VERCEL HANDLER (Bu bölüm değişmedi) ---
+# --- VERCEL HANDLER (Gist ID'yi okuyacak şekilde güncellendi) ---
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_path = urlparse(self.path)
@@ -161,6 +160,7 @@ class handler(BaseHTTPRequestHandler):
 
         user_id = query_params.get('user_id', [None])[0]
         target_group = query_params.get('group', ['TURKISH'])[0]
+        gist_id = query_params.get('gist_id', [None])[0]
 
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
@@ -168,5 +168,5 @@ class handler(BaseHTTPRequestHandler):
         response = {'status': 'success', 'message': 'Bot task is running in the background.'}
         self.wfile.write(json.dumps(response).encode('utf-8'))
         
-        run_bot(user_id=user_id, target_group=target_group)
+        run_bot(user_id=user_id, target_group=target_group, gist_id=gist_id)
         return
