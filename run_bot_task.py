@@ -1,20 +1,17 @@
-# run_bot_task.py (Dinamik Gist Güncelleme Sürümü)
+# run_bot_task.py ("Callback" Entegre Edilmiş Nihai Sürüm)
 import os
 import sys
 import requests
 from datetime import datetime
 from gold_club_bot import GoldClubBot
-from app import get_db_connection, send_email_notification # upload_to_gist'i artık buradan almıyoruz
+from app import get_db_connection, send_email_notification # get_db_connection'ı sadece loglama için tutuyoruz
 import json
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-# --- GÜNCELLENMİŞ FONKSİYON: Gist OLUŞTURUR veya GÜNCELLER ---
 def upload_or_update_gist(filename, content, description, gist_id=None):
     """
     Verilen içeriği GitHub Gist'e yükler veya günceller.
-    Eğer gist_id verilirse, o Gist'i günceller (PATCH).
-    Eğer gist_id verilmezse, yeni bir Gist oluşturur (POST).
     """
     try:
         token = os.environ['GITHUB_TOKEN']
@@ -38,22 +35,19 @@ def upload_or_update_gist(filename, content, description, gist_id=None):
 
     try:
         if gist_id:
-            # GÜNCELLEME MODU
             print(f"--> Mevcut Gist (ID: {gist_id}) güncelleniyor...")
             api_url = f"https://api.github.com/gists/{gist_id}"
             response = requests.patch(api_url, headers=headers, json=payload, timeout=30)
         else:
-            # OLUŞTURMA MODU
             print("--> Yeni bir Gist oluşturuluyor...")
             api_url = "https://api.github.com/gists"
-            payload['public'] = False # Yeni Gist'ler her zaman gizli olmalı
+            payload['public'] = False
             response = requests.post(api_url, headers=headers, json=payload, timeout=30)
         
         response.raise_for_status()
         data = response.json()
         
         new_gist_id = data.get('id')
-        # Dosya adını dinamik olarak al, çünkü payload ile aynı olmayabilir
         file_key = list(data.get('files', {}).keys())[0]
         raw_url = data.get('files', {}).get(file_key, {}).get('raw_url')
 
@@ -87,6 +81,7 @@ def run_bot(user_id=None, target_group="TURKISH", gist_id=None):
 
     if not result_data or not result_data.get('channels'):
         print("Bot işlemi başarısız oldu veya kanal bulunamadı.")
+        # Başarısızlığı logla (bu kısım Vercel Postgres'e loglar, ana MySQL'e değil)
         try:
             conn = get_db_connection()
             if conn and user_id:
@@ -96,7 +91,7 @@ def run_bot(user_id=None, target_group="TURKISH", gist_id=None):
                 conn.commit()
                 conn.close()
         except Exception as log_e:
-            print(f"Loglama hatası: {log_e}")
+            print(f"Vercel Postgres loglama hatası: {log_e}")
         return
 
     m3u_content = "#EXTM3U\n"
@@ -112,27 +107,34 @@ def run_bot(user_id=None, target_group="TURKISH", gist_id=None):
     if new_gist_id and new_raw_url:
         print(f"-> Gist işlemi başarılı. ID: {new_gist_id}, URL: {new_raw_url}")
         
-        if not gist_id: # Sadece ilk Gist oluşturulduğunda çalışır
-            print(f"--> Bu yeni bir Gist. Kullanıcı {user_id} için veritabanı güncelleniyor...")
-            try:
-                conn = get_db_connection()
-                if conn and user_id:
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE users SET gist_id = %s, gist_raw_url = %s WHERE id = %s", (new_gist_id, new_raw_url, user_id))
-                    conn.commit()
-                    cursor.close()
-                    conn.close()
-                    print("--> Veritabanı başarıyla güncellendi.")
-                else:
-                     print("[HATA] Veritabanı güncellenemedi, bağlantı sorunu veya user_id eksik.")
-            except Exception as e:
-                print(f"[VERİTABANI HATASI] Gist bilgileri kaydedilemedi: {e}")
+        # --- YENİ BÖLÜM: Veritabanını güncellemek için PHP'ye haber ver ---
+        try:
+            callback_url = os.environ['CALLBACK_URL']
+            secret = os.environ['CALLBACK_SECRET']
+            
+            params = {
+                'secret': secret,
+                'user_id': user_id,
+                'gist_id': new_gist_id,
+                'raw_url': new_raw_url
+            }
+            
+            print(f"--> Veritabanı güncellemesi için callback isteği gönderiliyor: {callback_url}")
+            callback_response = requests.get(callback_url, params=params, timeout=15)
+            callback_response.raise_for_status() # HTTP hatası varsa exception fırlat
+            print(f"--> Callback isteği başarıyla gönderildi. Yanıt: {callback_response.text}")
+
+        except KeyError:
+            print("[HATA] CALLBACK_URL veya CALLBACK_SECRET ortam değişkenleri ayarlanmamış.")
+        except requests.RequestException as e:
+            print(f"[CALLBACK HATASI] Callback isteği gönderilemedi: {e}")
+        # --------------------------------------------------------------------
         
         # E-posta gönderme mantığı
         email_subject = f"Yeni Playlist Oluşturuldu ({target_group})"
         email_body = (f"Yeni bir M3U playlist'i başarıyla oluşturuldu/güncellendi.\n\n"
                       f"Kullanıcı ID: {user_id or 'Belirtilmedi'}\n"
-                      f"Kalıcı Link: {new_raw_url}\n"
+                      f"Kalıcı Linkiniz: {new_raw_url}\n"
                       f"Kanal Sayısı: {len(result_data['channels'])}\n"
                       f"Son Kullanma Tarihi: {result_data['expiry']}")
         send_email_notification(email_subject, email_body)
@@ -150,7 +152,7 @@ def run_bot(user_id=None, target_group="TURKISH", gist_id=None):
                 conn.commit()
                 conn.close()
         except Exception as log_e:
-            print(f"Loglama hatası: {log_e}")
+            print(f"Vercel Postgres loglama hatası: {log_e}")
 
 # --- VERCEL HANDLER (Gist ID'yi okuyacak şekilde güncellendi) ---
 class handler(BaseHTTPRequestHandler):
