@@ -12,7 +12,11 @@ try:
     APP_EMAIL = os.environ['APP_EMAIL']
     APP_PASSWORD = os.environ['APP_PASSWORD']
     
-    # GitHub Gist için API anahtarı
+    # Browserless API Token
+    BROWSERLESS_TOKEN = os.environ.get('BROWSERLESS_TOKEN')
+    
+    if not BROWSERLESS_TOKEN:
+         print("UYARI: BROWSERLESS_TOKEN ayarlanmamış. Bot çalışmayabilir.")
     GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 
     # E-posta bildirim ayarları

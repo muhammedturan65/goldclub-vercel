@@ -26,44 +26,39 @@ class GoldClubBot:
         if self.socketio and self.sid:
             self.socketio.emit('status_update', {'message': message}, to=self.sid)
 
-    def _setup_driver(self):
-        self._report_status("-> Uzak tarayıcıya (LambdaTest) bağlanılıyor...")
+        self._report_status("-> Uzak tarayıcıya (Browserless) bağlanılıyor...")
 
-        # Vercel ortam değişkenlerinden LambdaTest kimlik bilgilerini al
-        lt_username = os.environ.get('LT_USERNAME')
-        lt_access_key = os.environ.get('LT_ACCESS_KEY')
+        # Vercel ortam değişkenlerinden Browserless kimlik bilgilerini al
+        browserless_token = os.environ.get('BROWSERLESS_TOKEN')
 
-        if not lt_username or not lt_access_key:
-            error_message = "[KRİTİK HATA] LT_USERNAME veya LT_ACCESS_KEY ortam değişkenleri bulunamadı!"
+        if not browserless_token:
+            error_message = "[KRİTİK HATA] BROWSERLESS_TOKEN ortam değişkeni bulunamadı!"
             self._report_status(error_message)
             raise ValueError(error_message)
 
-        # LambdaTest'in ihtiyaç duyduğu tarayıcı ve platform ayarları
-        lt_options = {
-            "platformName": "Windows 10",
-            "browserName": "Chrome",
-            "browserVersion": "latest",
-            "build": "GoldClub Bot Run",
-            "name": f"Playlist Generation Task - {time.strftime('%Y-%m-%d %H:%M')}",
-            "visual": False,
-            "network": True,
-            "console": True,
-        }
-
-        # Selenium 4 için options nesnesini ve LambdaTest ayarlarını birleştirme
+        # Chrome Options ayarları (Headless ve performans için)
         options = webdriver.ChromeOptions()
-        options.set_capability('LT:Options', lt_options)
+        options.add_argument("--headless=new")  # Yeni headless modu
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--disable-notifications")
+        options.add_argument("--disable-popup-blocking")
+        
+        # Browserless kapasiteleri (gerekirse session timeout vb. eklenebilir)
+        # options.set_capability('browserless:token', browserless_token) # URL parametresi olarak geçiyoruz ama burada da opsiyonel
 
-        # LambdaTest bağlantı adresi
-        grid_url = f"https://{lt_username}:{lt_access_key}@hub.lambdatest.com/wd/hub"
+        # Browserless bağlantı adresi
+        grid_url = f"https://chrome.browserless.io/webdriver?token={browserless_token}"
 
         try:
             self.driver = webdriver.Remote(
                 command_executor=grid_url,
                 options=options
             )
-            self.wait = WebDriverWait(self.driver, 30)
-            self._report_status("-> Uzak tarayıcıya (LambdaTest) başarıyla bağlanıldı.")
+            self.wait = WebDriverWait(self.driver, 60) # Browserless bazen ilk açılışta bekletebilir
+            self._report_status("-> Uzak tarayıcıya (Browserless) başarıyla bağlanıldı.")
 
         except WebDriverException as e:
             self._report_status(f"[HATA] Uzak tarayıcıya bağlanılamadı: {e.msg}")
