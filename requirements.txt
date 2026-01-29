@@ -7,6 +7,9 @@ psycopg2-binary
 requests
 
 # Selenium botunun çalışması için GEREKLİ OLANLAR (Browserless ile kullanım)
-# Sadece requests ile API çağrısı yapıldığı için selenium gerekmez.
-# Ancak projede başka yerlerde kullanılmadığından emin olmak için temizliyoruz.
+# Selenium botunun çalışması için GEREKLİ OLANLAR
+selenium
+webdriver-manager
+requests
+
 

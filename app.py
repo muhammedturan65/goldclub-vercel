@@ -12,12 +12,14 @@ try:
     APP_EMAIL = os.environ['APP_EMAIL']
     APP_PASSWORD = os.environ['APP_PASSWORD']
     
-    # Browserless API Token
-    BROWSERLESS_TOKEN = os.environ.get('BROWSERLESS_TOKEN')
-    
-    if not BROWSERLESS_TOKEN:
-         print("UYARI: BROWSERLESS_TOKEN ayarlanmamış. Bot çalışmayabilir.")
-    GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
+    # Browserless API Token (Artık kullanılmıyor ama eski kod kalıntısı olarak dursa zarar gelmez, silebiliriz de)
+    # BROWSERLESS_TOKEN = os.environ.get('BROWSERLESS_TOKEN')
+
+    # GitHub Actions Entegrasyonu
+    GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN') # Gist için
+    G_TOKEN = os.environ.get('G_TOKEN') # Actions Dispatch için (PAT)
+    GITHUB_REPO = os.environ.get('GITHUB_REPO') # örn: kullanici/repo
+
 
     # E-posta bildirim ayarları
     SMTP_SERVER = os.environ['SMTP_SERVER']
@@ -276,25 +278,37 @@ def get_history():
 
 @app.route('/api/start-process', methods=['POST'])
 def start_process():
-    # BU FONKSİYON, UZUN SÜREN BOT İŞLEMİNİ DOĞRUDAN ÇALIŞTIRMAZ!
-    # Vercel'de bir istek en fazla 10-60 saniye sürebilir. Selenium işlemi çok daha uzun sürer.
-    # Bu endpoint, sadece bir "iş" kaydı oluşturur.
-    # Asıl bot mantığı, bir Vercel Cron Job tarafından tetiklenen başka bir fonksiyonda
-    # veya tamamen ayrı bir serviste çalışmalıdır.
-    
     data = request.json
-    target_group = data.get('target_group', 'all')
-
-    # Bu noktada, bu isteği işleyecek bir arka plan mekanizmasını tetiklemeniz gerekir.
-    # Örneğin:
-    # 1. Veritabanına "pending" (beklemede) durumunda yeni bir iş kaydı ekleyebilirsiniz.
-    # 2. Vercel Cron Job'unuz periyodik olarak çalışıp "pending" işleri arar.
-    # 3. Bir iş bulduğunda, Selenium botunu çalıştırır ve sonuçları veritabanına yazar.
-
-    print(f"Arka plan işlemi için istek alındı. Filtre: {target_group}")
+    target_group = data.get('target_group', 'TURKISH')
     
-    # Frontend'e işlemin başladığına dair bilgi verilir.
-    return jsonify({"message": f"'{target_group}' grubu için link üretim işlemi arka planda başlatıldı. Sonuçlar bir süre sonra geçmişe yansıyacaktır."}), 202
+    # GitHub Dispatch İsteği Hazırlama
+    github_token = os.environ.get('G_TOKEN')
+    repo_name = os.environ.get('GITHUB_REPO') # örn: kullaniciadi/repoadi
+    
+    if not github_token or not repo_name:
+        return jsonify({"error": "Sunucu yapılandırma hatası: GitHub Token veya Repo adı tanımlanmamış."}), 500
+
+    url = f"https://api.github.com/repos/{repo_name}/actions/workflows/bot_task.yaml/dispatches"
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    payload = {
+        "ref": "main", # veya master, hangi branch çalışacaksa
+        "inputs": {
+            "target_group": target_group,
+            "user_id": "1" # Şimdilik sabit, normalde session'dan gelir
+        }
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code == 204:
+            return jsonify({"message": f"'{target_group}' grubu için işlem GitHub Actions üzerinde başlatıldı. 1-2 dakika içinde sonuçlar geçmişe düşecektir."}), 200
+        else:
+            return jsonify({"error": f"GitHub API Hatası: {response.text}"}), 500
+    except Exception as e:
+        return jsonify({"error": f"İstek Hatası: {str(e)}"}), 500
 
 
 @app.route('/generate_custom_playlist', methods=['POST'])
