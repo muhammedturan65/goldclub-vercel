@@ -106,15 +106,27 @@ class GoldClubBot:
                 
                 lastStep = "Servis Detayına Tıklama";
                 // Sayfadaki ilk 'View Details' veya 'Active' butonunu bulmaya çalışalım
-                await page.waitForFunction(() => {
-                    return Array.from(document.querySelectorAll('button, a.btn'))
-                        .some(b => b.textContent.includes('View Details') || b.textContent.includes('Yönet')  || b.textContent.includes('Active'));
-                }, { timeout: 30000 });
+                try {
+                    await page.waitForFunction(() => {
+                        return Array.from(document.querySelectorAll('button, a.btn, td.text-center a'))
+                            .some(b => b.textContent.includes('View Details') || b.textContent.includes('Yönet')  || b.textContent.includes('Active') || b.textContent.includes('Aktif'));
+                    }, { timeout: 60000 });
+                } catch (e) {
+                    // Eğer buton bulunamadıysa, belki hiç servis yoktur?
+                    const noServices = await page.evaluate(() => {
+                         const body = document.body.innerText;
+                         return body.includes('No Services Found') || body.includes('Kayıt Bulunamadı');
+                    });
+                    if (noServices) {
+                        throw new Error("Hizmetler sayfasında aktif ürün bulunamadı. Sipariş onaylanmamış olabilir.");
+                    }
+                    throw e; // Diğer durumlarda timeout hatasını fırlat
+                }
 
                 await page.evaluate(() => {
                     const els = Array.from(document.querySelectorAll('button, a.btn, td.text-center a')); 
                     // Genişletilmiş seçici: Tablo içindeki linkleri de kontrol et
-                    const target = els.find(b => b.textContent.includes('View Details') || b.textContent.includes('Yönet') || b.textContent.includes('Active'));
+                    const target = els.find(b => b.textContent.includes('View Details') || b.textContent.includes('Yönet') || b.textContent.includes('Active') || b.textContent.includes('Aktif'));
                     if(target) target.click();
                     else throw new Error("Detay butonu DOM içinde bulunamadı.");
                 });
