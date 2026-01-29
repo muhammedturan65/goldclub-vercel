@@ -1,0 +1,42 @@
+name: Run GoldClub Bot
+on:
+  workflow_dispatch:
+    inputs:
+      target_group:
+        description: 'Filtrelenecek Kanal Grubu (örn: TURKISH)'
+        required: false
+        default: 'TURKISH'
+      user_id:
+        description: 'İstemi Yapan Kullanıcı ID (Loglar için)'
+        required: false
+        default: '0'
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # Maksimum 10 dakika sürer
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium webdriver-manager requests psycopg2-binary
+
+      - name: Run Bot Script
+        env:
+          APP_EMAIL: ${{ secrets.APP_EMAIL }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          # Target group ve User ID input olarak geliyor
+          TARGET_GROUP: ${{ github.event.inputs.target_group }}
+          USER_ID: ${{ github.event.inputs.user_id }}
+        run: |
+          python run_bot_task.py
