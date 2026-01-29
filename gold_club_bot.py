@@ -30,80 +30,102 @@ class GoldClubBot:
         Browserless üzerinde çalışacak Puppeteer (Node.js) kodunu string olarak döndürür.
         Python f-string formatı ile email ve şifre enjekte edilir.
         """
-        # JavaScript kodu içinde f-string çakışmasını önlemek için süslü parantezlere dikkat edilmeli.
-        # Bu yüzden JS kodunu raw string veya dikkatli bir şekilde oluşturuyoruz.
-        
         js_code = """
         export default async function({ page }) {
             const email = "%s";
             const password = "%s";
             const baseUrl = "https://goldclubhosting.xyz/";
-
-            const log = (msg) => console.log(msg);
+            
+            let lastStep = "Başlangıç";
 
             try {
+                // Konfigürasyon: Tüm beklemeler için varsayılan süreyi artır
+                page.setDefaultTimeout(60000); // 60 saniye
+                page.setDefaultNavigationTimeout(60000);
+
                 // 1. LOGIN
-                await page.goto(baseUrl + "index.php?rp=/login", { timeout: 60000 });
+                lastStep = "Login Sayfasına Gitme";
+                await page.goto(baseUrl + "index.php?rp=/login", { waitUntil: 'networkidle2', timeout: 60000 });
+                
+                lastStep = "Login Bilgilerini Girme";
                 await page.waitForSelector("#inputEmail");
                 await page.type("#inputEmail", email);
                 await page.type("#inputPassword", password);
                 
+                lastStep = "Login Butonuna Tıklama ve Bekleme";
                 await Promise.all([
-                    page.waitForNavigation(),
+                    page.waitForNavigation({ waitUntil: 'networkidle2' }),
                     page.click("#login")
                 ]);
 
                 // 2. ORDER FREE TRIAL
-                await page.goto(baseUrl + "index.php?rp=/store/free-trial", { timeout: 60000 });
+                lastStep = "Ücretsiz Deneme Sayfasına Gitme";
+                await page.goto(baseUrl + "index.php?rp=/store/free-trial", { waitUntil: 'networkidle2', timeout: 60000 });
                 
-                // Sipariş butonu genelde product7-order-button ama değişebilir, ID ile deniyoruz
+                lastStep = "Sipariş Butonunu Bulma";
+                // Sipariş butonu genelde product7-order-button ama değişebilir
                 try {
-                    await page.waitForSelector("#product7-order-button", { timeout: 10000 });
+                    await page.waitForSelector("#product7-order-button", { timeout: 15000 });
                     await page.click("#product7-order-button");
                 } catch (e) {
-                    // Alternatif seçiciler gerekirse eklenebilir
-                    throw new Error("Sipariş butonu bulunamadı.");
+                     // Eğer ID ile bulunamazsa, metin içeren bir buton deneyelim
+                     const buttons = await page.$$('button, a.btn');
+                     let clicked = false;
+                     for (const btn of buttons) {
+                         const text = await page.evaluate(el => el.textContent, btn);
+                         if (text.includes('Order Now') || text.includes('Sipariş Ver')) {
+                             await btn.click();
+                             clicked = true;
+                             break;
+                         }
+                     }
+                     if (!clicked) throw new Error("Sipariş butonu bulunamadı (ID veya Text ile).");
                 }
 
+                lastStep = "Checkout Sayfası İşlemleri";
                 await page.waitForSelector("#checkout");
                 await page.click("#checkout");
 
                 // Şartları kabul et (XPath to JS)
+                lastStep = "Sözleşme Kabul Etme";
                 await page.evaluate(() => {
                     const labels = Array.from(document.querySelectorAll('label'));
                     const target = labels.find(l => l.textContent.includes('I have read and agree'));
                     if(target) target.click();
                 });
                 
-                // Siparişi tamamla
+                lastStep = "Siparişi Tamamlama";
                 await Promise.all([
-                    page.waitForNavigation(),
+                    page.waitForNavigation({ waitUntil: 'networkidle2' }),
                     page.click("#btnCompleteOrder")
                 ]);
 
                 // 3. PRODUCT DETAILS (M3U Linkini alma)
-                // Doğrudan hizmetler sayfasına gidip oradan detaya girelim
-                await page.goto(baseUrl + "clientarea.php?action=services", { timeout: 60000 });
+                lastStep = "Hizmetler Sayfasına Gitme";
+                await page.goto(baseUrl + "clientarea.php?action=services", { waitUntil: 'networkidle2', timeout: 60000 });
                 
-                // Listeden 'Active' olan ilk servisin detayına veya View Details butonuna tıkla
-                // Basitçe sayfadaki ilk 'View Details' butonunu bulalım
+                lastStep = "Servis Detayına Tıklama";
+                // Sayfadaki ilk 'View Details' veya 'Active' butonunu bulmaya çalışalım
                 await page.waitForFunction(() => {
-                    return Array.from(document.querySelectorAll('button'))
-                        .some(b => b.textContent.includes('View Details') || b.textContent.includes('Yönet'));
-                });
+                    return Array.from(document.querySelectorAll('button, a.btn'))
+                        .some(b => b.textContent.includes('View Details') || b.textContent.includes('Yönet')  || b.textContent.includes('Active'));
+                }, { timeout: 30000 });
 
                 await page.evaluate(() => {
-                    const btns = Array.from(document.querySelectorAll('button', 'a.btn')); // buton veya link olabilir
-                    const target = btns.find(b => b.textContent.includes('View Details') || b.textContent.includes('Yönet'));
+                    const els = Array.from(document.querySelectorAll('button, a.btn, td.text-center a')); 
+                    // Genişletilmiş seçici: Tablo içindeki linkleri de kontrol et
+                    const target = els.find(b => b.textContent.includes('View Details') || b.textContent.includes('Yönet') || b.textContent.includes('Active'));
                     if(target) target.click();
+                    else throw new Error("Detay butonu DOM içinde bulunamadı.");
                 });
 
-                // Detay sayfası yüklendiğinde #m3ulinks elementini bekle
-                await page.waitForSelector("#m3ulinks", { timeout: 30000 });
+                lastStep = "M3U Link Elementini Bekleme (#m3ulinks)";
+                // Detay sayfası yüklendiğinde #m3ulinks elementini bekle (En çok hata burası olabilir, süreyi artırdık)
+                await page.waitForSelector("#m3ulinks", { timeout: 60000 });
                 
                 const m3uUrl = await page.$eval("#m3ulinks", el => el.value);
                 
-                // Son kullanma tarihi
+                lastStep = "Son Kullanma Tarihi Alma";
                 const expiryDate = await page.evaluate(() => {
                     const divs = Array.from(document.querySelectorAll('div'));
                     const targetDiv = divs.find(d => d.textContent.includes('Expiry Date:') || d.textContent.includes('Son Kullanma'));
@@ -123,10 +145,10 @@ class GoldClubBot:
                 };
 
             } catch (error) {
-                // Hata durumunda ekran görüntüsü veya hata mesajı döndür
                 return {
                     data: {
                         error: error.message,
+                        step: lastStep,
                         stack: error.stack
                     },
                     type: "application/json"
@@ -194,7 +216,8 @@ class GoldClubBot:
             data = result.get('data', {})
             
             if 'error' in data:
-                raise Exception(f"Browser İçi Hata: {data['error']}")
+                error_step = data.get('step', 'Bilinmiyor')
+                raise Exception(f"Browser İçi Hata ({error_step}): {data['error']}")
             
             m3u_link = data.get('url')
             expiry_date = data.get('expiry')
